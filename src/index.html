@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File Tools</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <h1 class="brand">File Tools</h1>
+        <nav class="pills" aria-label="Mode">
+          <button type="button" class="pill active" data-mode="encode">Encode</button>
+          <button type="button" class="pill" data-mode="decode">Decode</button>
+          <button type="button" class="pill" data-mode="split">Split</button>
+          <button type="button" class="pill" data-mode="merge">Merge</button>
+        </nav>
+      </header>
+
+      <div class="face-toggle" id="face-toggle" hidden>
+        <button type="button" class="face-btn active" data-face="drop">Drop</button>
+        <button type="button" class="face-btn" data-face="paste">Paste</button>
+      </div>
+
+      <div class="stage" id="stage">
+        <section class="panel drop active" id="drop" tabindex="0" aria-label="File drop zone">
+          <p class="drop-title" id="drop-title">Drop files here</p>
+          <p class="drop-sub" id="drop-sub">Outputs are written next to the source.</p>
+          <div class="drop-or"><span>or</span></div>
+          <button type="button" class="browse" id="browse">Browse files</button>
+          <ul class="file-list" id="file-list" hidden></ul>
+        </section>
+
+        <!-- 大文本不进 DOM：只展示摘要 -->
+        <section class="panel paste-face" id="paste-panel" tabindex="0" aria-label="Paste Base64 text" hidden>
+          <div class="paste-idle" id="paste-idle">
+            <p class="drop-title">Paste Base64 text</p>
+            <p class="drop-sub">
+              Press ⌘V / Ctrl+V, or use the button. Large pastes never enter the UI text box.
+            </p>
+            <button type="button" class="browse" id="paste-btn">Paste from clipboard</button>
+          </div>
+          <div class="paste-summary" id="paste-summary" hidden>
+            <p class="drop-title">Clipboard ready</p>
+            <dl class="meta">
+              <div><dt>Name</dt><dd id="paste-name">—</dd></div>
+              <div><dt>MD5</dt><dd id="paste-md5">—</dd></div>
+              <div><dt>Size</dt><dd id="paste-size">—</dd></div>
+            </dl>
+            <button type="button" class="browse" id="paste-clear">Clear</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="chunk" id="chunk-row" hidden>
+        <label for="spl-size">Chunk size</label>
+        <input id="spl-size" type="number" min="1" value="10" />
+        <div class="unit-group" role="group" aria-label="Unit">
+          <button type="button" class="unit active" data-unit="MB">MB</button>
+          <button type="button" class="unit" data-unit="KB">KB</button>
+          <button type="button" class="unit" data-unit="Bytes">B</button>
+        </div>
+        <input type="hidden" id="spl-unit" value="MB" />
+      </div>
+
+      <footer class="bottom">
+        <p class="hint" id="hint">
+          Encode writes <b>base64-N.txt</b><br />
+          line 1 name · line 2 MD5 · line 3 Base64
+        </p>
+        <button type="button" class="go" id="run">Convert</button>
+      </footer>
+
+      <div class="status" id="status">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span class="status-text">Ready</span>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

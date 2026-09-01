@@ -1,0 +1,23 @@
+[package]
+name = "file-tools"
+version = "0.1.0"
+description = "File Tools — Base64 encode/decode, split and merge"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "file_tools_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+md-5 = "0.10"
+hex = "0.4"
+arboard = "3"

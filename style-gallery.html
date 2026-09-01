@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>File Tools — 结构风格样板</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: "Avenir Next", "Helvetica Neue", "PingFang SC", sans-serif;
+      background: #111214;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .picker {
+      flex: 0 0 auto;
+      padding: 14px 18px 12px;
+      border-bottom: 1px solid #2a2a2e;
+      background: #0c0c0e;
+    }
+    .picker h1 { font-size: 15px; font-weight: 650; margin-bottom: 4px; }
+    .picker > p { font-size: 12px; color: #8a8a90; margin-bottom: 10px; line-height: 1.4; }
+    .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    @media (max-width: 900px) { .tabs { grid-template-columns: 1fr 1fr; } }
+    .tab {
+      appearance: none; border: 1px solid #333; background: #17171a;
+      color: #bbb; padding: 10px 11px; border-radius: 8px;
+      font: inherit; text-align: left; cursor: pointer;
+    }
+    .tab strong { display: block; color: #fff; font-size: 13px; margin-bottom: 3px; }
+    .tab span { display: block; font-size: 11px; color: #888; line-height: 1.35; }
+    .tab.active { border-color: #fff; background: #242428; }
+    .note { margin-top: 10px; font-size: 12px; color: #9a9aa0; max-width: 860px; line-height: 1.45; }
+
+    .stage {
+      flex: 1; min-height: 0;
+      display: grid; place-items: center;
+      padding: 20px;
+      background: radial-gradient(ellipse at 50% 0%, #222228, #0e0e10 65%);
+    }
+    .viewport {
+      width: min(760px, 100%);
+      height: min(560px, 96%);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 28px 70px rgba(0,0,0,.55);
+      position: relative;
+      background: #000;
+    }
+    .preview { display: none; height: 100%; }
+    .preview.active { display: flex; flex-direction: column; }
+
+    button, input, select { font: inherit; }
+    .ghost { appearance: none; border: none; background: transparent; cursor: default; }
+
+    /* ========== 1 工具条工作站 ========== */
+    #p1 { background: #eceff3; color: #1b2430; }
+    #p1 .tb {
+      height: 44px; display: flex; align-items: center; gap: 2px;
+      padding: 0 10px; background: #dde2e9; border-bottom: 1px solid #c5ccd6;
+    }
+    #p1 .tb .logo {
+      font-weight: 700; font-size: 13px; margin-right: 10px; letter-spacing: -.02em;
+    }
+    #p1 .tb .seg {
+      display: flex; background: #cfd5de; border-radius: 7px; padding: 2px; gap: 1px;
+    }
+    #p1 .tb .seg button {
+      appearance: none; border: 0; background: transparent; color: #334;
+      padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: 600;
+    }
+    #p1 .tb .seg button.on { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    #p1 .tb .spacer { flex: 1; }
+    #p1 .tb .meta { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #667; }
+    #p1 .work { flex: 1; display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
+    #p1 .pathbar {
+      display: flex; gap: 8px; padding: 12px 14px; background: #fff; border-bottom: 1px solid #d5dae2;
+    }
+    #p1 .pathbar input {
+      flex: 1; border: 1px solid #c5ccd6; border-radius: 6px; padding: 8px 10px;
+      font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: #f7f8fa;
+    }
+    #p1 .pathbar button {
+      appearance: none; border: 1px solid #c5ccd6; background: #eef1f5;
+      border-radius: 6px; padding: 0 12px; font-size: 12px; font-weight: 600;
+    }
+    #p1 .table { overflow: auto; padding: 0; }
+    #p1 table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #p1 th, #p1 td { padding: 9px 14px; text-align: left; border-bottom: 1px solid #e1e5eb; }
+    #p1 th { font-size: 11px; color: #778; font-weight: 600; background: #f4f6f8; position: sticky; top: 0; }
+    #p1 td.mono { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+    #p1 .foot {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; background: #dde2e9; border-top: 1px solid #c5ccd6;
+    }
+    #p1 .foot .cta {
+      appearance: none; border: 0; background: #1d4ed8; color: #fff;
+      padding: 8px 16px; border-radius: 6px; font-weight: 650; font-size: 12.5px;
+    }
+
+    /* ========== 2 磁贴启动台 ========== */
+    #p2 { background: #0f1412; color: #e8f2ee; }
+    #p2 .hero {
+      padding: 28px 28px 8px;
+    }
+    #p2 .hero .appname {
+      font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+      color: #6ecfb8; font-family: ui-monospace, Menlo, monospace; margin-bottom: 8px;
+    }
+    #p2 .hero h2 {
+      font-size: 34px; letter-spacing: -.04em; font-weight: 650; line-height: 1.05;
+      margin-bottom: 8px;
+    }
+    #p2 .hero p { color: #90a89e; font-size: 14px; max-width: 28em; }
+    #p2 .tiles {
+      flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      padding: 18px 28px 28px; min-height: 0;
+    }
+    #p2 .tile {
+      border: 1px solid #24332d; background: linear-gradient(160deg, #18221e, #121a17);
+      border-radius: 16px; padding: 18px 16px; display: flex; flex-direction: column; gap: 8px;
+      position: relative; overflow: hidden;
+    }
+    #p2 .tile::after {
+      content: ""; position: absolute; right: -20px; bottom: -30px;
+      width: 90px; height: 90px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(110,207,184,.18), transparent 70%);
+    }
+    #p2 .tile .num {
+      font-family: "Avenir Next Condensed", "Helvetica Neue", sans-serif;
+      font-size: 28px; font-weight: 600; color: #6ecfb8; letter-spacing: -.03em;
+    }
+    #p2 .tile strong { font-size: 16px; letter-spacing: -.02em; }
+    #p2 .tile span { font-size: 12px; color: #8aa397; line-height: 1.35; }
+    #p2 .tile.hot { border-color: rgba(110,207,184,.45); box-shadow: inset 0 0 0 1px rgba(110,207,184,.15); }
+
+    /* ========== 3 终端流水线 ========== */
+    #p3 {
+      background: #0a0c0b; color: #c8d6c4;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    #p3 .bar {
+      height: 28px; display: flex; align-items: center; gap: 10px;
+      padding: 0 12px; border-bottom: 1px solid #1c2420; color: #6a7a6c; font-size: 11px;
+    }
+    #p3 .bar b { color: #9fd18a; font-weight: 600; }
+    #p3 .cols { flex: 1; display: grid; grid-template-columns: 150px 1fr; min-height: 0; }
+    #p3 .modes {
+      border-right: 1px solid #1c2420; padding: 10px 0; font-size: 12px;
+    }
+    #p3 .modes button {
+      appearance: none; width: 100%; border: 0; background: transparent;
+      color: #7a8b7c; text-align: left; padding: 8px 14px; font: inherit; cursor: default;
+    }
+    #p3 .modes button.on { color: #d7f0c8; background: #132016; box-shadow: inset 2px 0 0 #9fd18a; }
+    #p3 .pipe { padding: 14px 16px; overflow: auto; font-size: 12.5px; line-height: 1.55; }
+    #p3 .step { margin-bottom: 14px; }
+    #p3 .step .tag { color: #9fd18a; }
+    #p3 .step .dim { color: #5d6c5f; }
+    #p3 .prompt {
+      display: flex; gap: 8px; align-items: center; margin-top: 8px;
+      border-top: 1px dashed #243028; padding-top: 12px;
+    }
+    #p3 .prompt input {
+      flex: 1; background: transparent; border: 0; outline: none;
+      color: #e7f5dc; font: inherit;
+    }
+    #p3 .prompt button {
+      appearance: none; border: 1px solid #3a4a3c; background: #132016;
+      color: #9fd18a; padding: 4px 10px; font: inherit; font-size: 11px;
+    }
+    #p3 .runline {
+      margin-top: auto; border-top: 1px solid #1c2420; padding: 10px 16px;
+      display: flex; justify-content: space-between; align-items: center; font-size: 12px;
+    }
+    #p3 .runline button {
+      appearance: none; border: 1px solid #9fd18a; background: #9fd18a; color: #0a0c0b;
+      padding: 5px 12px; font: inherit; font-weight: 700; letter-spacing: .04em;
+    }
+
+    /* ========== 4 拖放工作台 ========== */
+    #p4 { background: #f4f1ea; color: #1c1915; }
+    #p4 .top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px 0;
+    }
+    #p4 .top .title {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+      font-size: 22px; letter-spacing: -.02em;
+    }
+    #p4 .pills {
+      display: flex; gap: 6px; background: #e7e1d5; padding: 3px; border-radius: 999px;
+    }
+    #p4 .pills button {
+      appearance: none; border: 0; background: transparent; color: #5a5348;
+      padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    }
+    #p4 .pills button.on { background: #1c1915; color: #f4f1ea; }
+    #p4 .drop {
+      flex: 1; margin: 18px 20px 12px;
+      border: 2px dashed #b7ae9f; border-radius: 22px;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(255,255,255,.7), transparent 45%),
+        #ebe6db;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 8px; text-align: center; padding: 20px;
+    }
+    #p4 .drop .big {
+      font-family: "Iowan Old Style", Palatino, serif;
+      font-size: 28px; letter-spacing: -.03em;
+    }
+    #p4 .drop .sub { color: #6d6558; font-size: 13px; max-width: 22em; line-height: 1.4; }
+    #p4 .drop .or {
+      margin-top: 6px; font-size: 12px; color: #8a8070;
+      display: flex; align-items: center; gap: 10px;
+    }
+    #p4 .drop .or::before, #p4 .drop .or::after {
+      content: ""; height: 1px; width: 36px; background: #c9c0b0;
+    }
+    #p4 .drop .browse {
+      appearance: none; border: 1px solid #1c1915; background: transparent;
+      color: #1c1915; border-radius: 999px; padding: 8px 16px; font-weight: 650; font-size: 12.5px;
+    }
+    #p4 .bottom {
+      display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end;
+      padding: 0 20px 18px;
+    }
+    #p4 .hint {
+      font-size: 12px; color: #6d6558; line-height: 1.4;
+    }
+    #p4 .go {
+      appearance: none; border: 0; background: #c45c26; color: #fff;
+      padding: 12px 22px; border-radius: 14px; font-weight: 700; font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="picker">
+    <h1>File Tools · 四种「结构」风格</h1>
+    <p>不是换皮配色，而是换信息架构与操作流。点选预览，回我编号（或描述你想混搭的部分）。</p>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-id="1" type="button">
+        <strong>1 · 工具条工作站</strong>
+        <span>顶栏切换功能，中间像表格管文件</span>
+      </button>
+      <button class="tab" data-id="2" type="button">
+        <strong>2 · 磁贴启动台</strong>
+        <span>先选任务大卡片，再进入操作</span>
+      </button>
+      <button class="tab" data-id="3" type="button">
+        <strong>3 · 终端流水线</strong>
+        <span>像命令行管道，步骤一眼看清</span>
+      </button>
+      <button class="tab" data-id="4" type="button">
+        <strong>4 · 拖放工作台</strong>
+        <span>中央大投放区，极简单任务</span>
+      </button>
+    </div>
+    <p class="note" id="note">
+      <b>1</b>：适合批量处理、路径密集。顶部 Segmented 切换 ENC/DEC/SPL/MRG，主区是路径栏 + 文件列表 + 底部执行，像轻量桌面工具（Transmission / 压缩软件一类）。
+    </p>
+  </div>
+
+  <div class="stage">
+    <div class="viewport">
+      <!-- 1 -->
+      <section class="preview active" id="p1">
+        <div class="tb">
+          <div class="logo">File Tools</div>
+          <div class="seg">
+            <button class="on" type="button">Encode</button>
+            <button type="button">Decode</button>
+            <button type="button">Split</button>
+            <button type="button">Merge</button>
+          </div>
+          <div class="spacer"></div>
+          <div class="meta">3 files · ready</div>
+        </div>
+        <div class="work">
+          <div class="pathbar">
+            <input value="/Users/you/Desktop/payloads/" readonly />
+            <button type="button">Browse</button>
+            <button type="button">Paste</button>
+          </div>
+          <div class="table">
+            <table>
+              <thead>
+                <tr><th>File</th><th>Size</th><th>Output</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="mono">report.pdf</td><td>2.4 MB</td><td class="mono">base64-1.txt</td></tr>
+                <tr><td class="mono">photo.png</td><td>814 KB</td><td class="mono">base64-2.txt</td></tr>
+                <tr><td class="mono">dump.bin</td><td>12.0 MB</td><td class="mono">base64-3.txt</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="foot">
+            <span style="font-size:12px;color:#667">Format: name / MD5 / Base64</span>
+            <button class="cta" type="button">Convert to Base64</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 -->
+      <section class="preview" id="p2">
+        <div class="hero">
+          <div class="appname">File Tools</div>
+          <h2>What do you<br/>need to do?</h2>
+          <p>Pick a job. Each tool opens its own focused workspace next.</p>
+        </div>
+        <div class="tiles">
+          <div class="tile hot">
+            <div class="num">01</div>
+            <strong>File → Base64</strong>
+            <span>Seal bytes into portable text with MD5.</span>
+          </div>
+          <div class="tile">
+            <div class="num">02</div>
+            <strong>Base64 → File</strong>
+            <span>Restore original files and verify checksum.</span>
+          </div>
+          <div class="tile">
+            <div class="num">03</div>
+            <strong>Split File</strong>
+            <span>Cut one file into numbered chunks.</span>
+          </div>
+          <div class="tile">
+            <div class="num">04</div>
+            <strong>Merge Files</strong>
+            <span>Reassemble .0001 · .0002 · … in order.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 -->
+      <section class="preview" id="p3">
+        <div class="bar"><b>file-tools</b><span>session · encode</span><span style="margin-left:auto">utf-8</span></div>
+        <div class="cols">
+          <div class="modes">
+            <button class="on" type="button">encode</button>
+            <button type="button">decode</button>
+            <button type="button">split</button>
+            <button type="button">merge</button>
+          </div>
+          <div class="pipe">
+            <div class="step">
+              <div><span class="tag">$1 input</span> <span class="dim">← paths</span></div>
+              <div>/Users/you/Desktop/archive.zip</div>
+              <div>/Users/you/Desktop/notes.md</div>
+            </div>
+            <div class="step">
+              <div><span class="tag">$2 transform</span> <span class="dim">→ base64 + md5</span></div>
+              <div class="dim">write base64-N.txt beside source</div>
+            </div>
+            <div class="step">
+              <div><span class="tag">$3 output</span></div>
+              <div class="dim">pending — run to materialize</div>
+            </div>
+            <div class="prompt">
+              <span class="tag">›</span>
+              <input value="paste path and press enter" readonly />
+              <button type="button">browse</button>
+            </div>
+          </div>
+        </div>
+        <div class="runline">
+          <span class="dim">pipeline ready · 2 inputs</span>
+          <button type="button">RUN</button>
+        </div>
+      </section>
+
+      <!-- 4 -->
+      <section class="preview" id="p4">
+        <div class="top">
+          <div class="title">File Tools</div>
+          <div class="pills">
+            <button class="on" type="button">Encode</button>
+            <button type="button">Decode</button>
+            <button type="button">Split</button>
+            <button type="button">Merge</button>
+          </div>
+        </div>
+        <div class="drop">
+          <div class="big">Drop files here</div>
+          <div class="sub">Or paste a path. Outputs are written next to the source.</div>
+          <div class="or">or</div>
+          <button class="browse" type="button">Browse files</button>
+        </div>
+        <div class="bottom">
+          <div class="hint">Encode writes <b>base64-N.txt</b><br/>line 1 name · line 2 MD5 · line 3 Base64</div>
+          <button class="go" type="button">Convert</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const notes = {
+      1: "<b>1 · 工具条工作站</b>：适合批量处理、路径密集。顶部 Segmented 切换功能，主区是路径栏 + 文件列表 + 底部执行，像轻量桌面工具。",
+      2: "<b>2 · 磁贴启动台</b>：先选「要做什么」再进入细节。首页只有四个大任务卡，认知负担最低，适合偶尔用的工具。",
+      3: "<b>3 · 终端流水线</b>：把操作画成 pipeline（input → transform → output）。偏极客/运维手感，路径与步骤可读性极强。",
+      4: "<b>4 · 拖放工作台</b>：中央大投放区主导，顶栏只切换模式。动作少、焦点单一，像系统自带「投放型」小工具。"
+    };
+
+    const tabs = document.getElementById("tabs");
+    const note = document.getElementById("note");
+
+    function show(id) {
+      document.querySelectorAll(".preview").forEach((p) => p.classList.toggle("active", p.id === "p" + id));
+      document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.id === id));
+      note.innerHTML = notes[id];
+    }
+
+    tabs.addEventListener("click", (e) => {
+      const btn = e.target.closest(".tab");
+      if (!btn) return;
+      show(btn.dataset.id);
+    });
+  </script>
+</body>
+</html>
