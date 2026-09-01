@@ -25,12 +25,17 @@ npm run build
 
 1. 打开 [Actions → Build Windows](https://github.com/isfangmk/file-tools/actions/workflows/build-windows.yml)
 2. 等待任务完成
-3. 在 **Artifacts** 下载 `File-Tools-Windows-Setup`（NSIS 安装包 `.exe`）
+3. 在 **Artifacts** 下载安装包：
+   - `File-Tools-Windows-Setup` — 在线安装包（体积小，安装时需联网下载 WebView2）
+   - `File-Tools-Windows-Setup-Offline` — 离线安装包（约 +127MB，内网可直接安装）
+   - `File-Tools-Windows-MSI` — MSI 安装包（可选）
 
 本地 Windows 机器可直接运行：
 
 ```bat
 build.bat
+REM 内网离线包：
+npm run build:windows:offline
 ```
 
 产物：`src-tauri\target\release\bundle\nsis\File Tools_0.1.0_x64-setup.exe`

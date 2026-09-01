@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
+    "build:windows:offline": "tauri build --config src-tauri/tauri.offline.conf.json",
     "tauri": "tauri"
   },
   "devDependencies": {
