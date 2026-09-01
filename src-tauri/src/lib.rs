@@ -26,9 +26,33 @@ fn md5_hex(data: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// 将若干文件编码为 base64-N.txt（第 1 行文件名、第 2 行 MD5、第 3 行 Base64）。
-#[tauri::command]
-fn encode_files(paths: Vec<String>) -> Result<String, String> {
+fn read_clipboard_text() -> Result<String, String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Clipboard unavailable: {e}"))?;
+    clipboard
+        .get_text()
+        .map_err(|e| format!("Clipboard has no text: {e}"))
+}
+
+/// 将文本写入系统剪贴板（大内容在 Rust 侧处理，避免 WebView 卡顿）。
+fn write_clipboard_text(text: &str) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Clipboard unavailable: {e}"))?;
+    clipboard
+        .set_text(text.to_string())
+        .map_err(|e| format!("Failed to copy to clipboard: {e}"))
+}
+
+/// 编码结果：消息 + 输出文件路径列表（供前端展示复制按钮）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EncodeResult {
+    message: String,
+    outputs: Vec<String>,
+}
+
+/// 将若干文件编码为 base64-N.txt。
+fn encode_files_sync(paths: Vec<String>) -> Result<EncodeResult, String> {
     if paths.is_empty() {
         return Err("Select at least one file.".into());
     }
@@ -57,14 +81,41 @@ fn encode_files(paths: Vec<String>) -> Result<String, String> {
         ok += 1;
     }
 
-    if outputs.len() == 1 {
-        Ok(format!("Done: {ok}/{total} file encoded -> {}", outputs[0]))
+    let message = if outputs.len() == 1 {
+        format!("Done: {ok}/{total} file encoded -> {}", outputs[0])
     } else {
-        Ok(format!(
+        format!(
             "Done: {ok}/{total} files encoded:\n{}",
             outputs.join("\n")
-        ))
-    }
+        )
+    };
+
+    Ok(EncodeResult { message, outputs })
+}
+
+#[tauri::command]
+async fn encode_files(paths: Vec<String>) -> Result<EncodeResult, String> {
+    tauri::async_runtime::spawn_blocking(move || encode_files_sync(paths))
+        .await
+        .map_err(|e| format!("encode task failed: {e}"))?
+}
+
+/// 将文本文件内容复制到剪贴板（Rust 侧读写，支持大文件）。
+fn copy_text_file_sync(path: String) -> Result<String, String> {
+    let text = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+    write_clipboard_text(&text)?;
+    let label = Path::new(&path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    Ok(format!("Copied {label} to clipboard"))
+}
+
+#[tauri::command]
+async fn copy_text_file(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || copy_text_file_sync(path))
+        .await
+        .map_err(|e| format!("copy task failed: {e}"))?
 }
 
 /// 解析「文件名 / MD5 / Base64」文本，返回 (建议文件名, 原始字节)。
@@ -143,14 +194,6 @@ struct PasteIngest {
     md5: String,
     chars: u64,
     size_label: String,
-}
-
-fn read_clipboard_text() -> Result<String, String> {
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|e| format!("Clipboard unavailable: {e}"))?;
-    clipboard
-        .get_text()
-        .map_err(|e| format!("Clipboard has no text: {e}"))
 }
 
 fn ingest_clipboard_b64_sync() -> Result<PasteIngest, String> {
@@ -373,6 +416,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             encode_files,
+            copy_text_file,
             decode_files,
             ingest_clipboard_b64,
             clear_paste_temp,
@@ -399,8 +443,8 @@ mod tests {
         let data = b"Hello World! ".repeat(500);
         fs::write(&src, &data).unwrap();
 
-        encode_files(vec![src.display().to_string()]).unwrap();
-        let b64 = dir.join("base64-1.txt");
+        let result = encode_files_sync(vec![src.display().to_string()]).unwrap();
+        let b64 = PathBuf::from(&result.outputs[0]);
         assert!(b64.is_file());
 
         // 解码会写出同名文件，先挪开原文件避免覆盖干扰断言
