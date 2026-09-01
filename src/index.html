@@ -53,6 +53,8 @@
         </section>
       </div>
 
+      <ul class="encode-outputs" id="encode-outputs" hidden></ul>
+
       <div class="chunk" id="chunk-row" hidden>
         <label for="spl-size">Chunk size</label>
         <input id="spl-size" type="number" min="1" value="10" />
@@ -66,7 +68,7 @@
 
       <footer class="bottom">
         <p class="hint" id="hint">
-          Encode writes <b>base64-N.txt</b><br />
+          Encode writes <b>base64-N.txt</b> — use Copy to grab output<br />
           line 1 name · line 2 MD5 · line 3 Base64
         </p>
         <button type="button" class="go" id="run">Convert</button>

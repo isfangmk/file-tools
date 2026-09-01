@@ -25,7 +25,7 @@ const copy = {
     sub: "Outputs are written next to the source.",
     browse: "Browse files",
     run: "Convert",
-    hint: "Encode writes <b>base64-N.txt</b><br />line 1 name · line 2 MD5 · line 3 Base64",
+    hint: "Encode writes <b>base64-N.txt</b> — use Copy to grab output<br />line 1 name · line 2 MD5 · line 3 Base64",
     multiple: true,
     dialogTitle: "Select files to encode",
     filters: null,
@@ -65,6 +65,9 @@ const copy = {
   },
 };
 
+/** 编码输出文件路径（用于复制按钮） */
+let encodeOutputs = [];
+
 const dropEl = document.getElementById("drop");
 const pastePanel = document.getElementById("paste-panel");
 const pasteIdle = document.getElementById("paste-idle");
@@ -80,6 +83,7 @@ const browseBtn = document.getElementById("browse");
 const fileList = document.getElementById("file-list");
 const faceToggle = document.getElementById("face-toggle");
 const chunkRow = document.getElementById("chunk-row");
+const encodeOutputsEl = document.getElementById("encode-outputs");
 const hintEl = document.getElementById("hint");
 const runBtn = document.getElementById("run");
 const statusEl = document.getElementById("status");
@@ -106,13 +110,20 @@ async function runJob(fn) {
 
 function renderFiles() {
   const list = paths;
+  const cfg = copy[mode];
   dropEl.classList.toggle("has-files", list.length > 0);
 
   if (!list.length) {
+    dropTitle.textContent = cfg.title;
+    dropSub.textContent = cfg.sub;
     fileList.hidden = true;
     fileList.innerHTML = "";
     return;
   }
+
+  dropTitle.textContent =
+    list.length === 1 ? "1 file selected" : `${list.length} files selected`;
+  dropSub.textContent = "Click Convert below, or add more files.";
 
   fileList.innerHTML = "";
   for (const p of list) {
@@ -204,6 +215,50 @@ function setDecodeFace(face) {
   }
 }
 
+function renderEncodeOutputs() {
+  encodeOutputsEl.innerHTML = "";
+  if (!encodeOutputs.length || mode !== "encode") {
+    encodeOutputsEl.hidden = true;
+    return;
+  }
+
+  for (const path of encodeOutputs) {
+    const row = document.createElement("li");
+    row.className = "encode-row";
+
+    const pathEl = document.createElement("span");
+    pathEl.className = "encode-path";
+    pathEl.textContent = path;
+    pathEl.title = path;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-btn";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const msg = await invoke("copy_text_file", { path });
+        setStatus(msg, "ok");
+      } catch (e) {
+        const err = typeof e === "string" ? e : e?.message || String(e);
+        setStatus(`Error: ${err}`, "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    row.append(pathEl, btn);
+    encodeOutputsEl.appendChild(row);
+  }
+  encodeOutputsEl.hidden = false;
+}
+
+function clearEncodeOutputs() {
+  encodeOutputs = [];
+  renderEncodeOutputs();
+}
+
 function setPaths(next) {
   const cfg = copy[mode];
   const list = (Array.isArray(next) ? next : next ? [next] : []).filter(Boolean);
@@ -213,6 +268,7 @@ function setPaths(next) {
   }
   if (paths.length) {
     clearPasteIngest();
+    clearEncodeOutputs();
   }
   renderFiles();
 }
@@ -232,6 +288,8 @@ function applyMode(next) {
   hintEl.innerHTML = cfg.hint;
   chunkRow.hidden = mode !== "split";
   faceToggle.hidden = mode !== "decode";
+  encodeOutputsEl.hidden = mode !== "encode" || !encodeOutputs.length;
+  if (mode !== "encode") clearEncodeOutputs();
   setDecodeFace("drop");
 
   paths = [];
@@ -303,7 +361,10 @@ runBtn.addEventListener("click", () => {
   runJob(async () => {
     if (mode === "encode") {
       if (!paths.length) throw new Error("Select at least one file.");
-      return invoke("encode_files", { paths });
+      const result = await invoke("encode_files", { paths });
+      encodeOutputs = result.outputs || [];
+      renderEncodeOutputs();
+      return result.message;
     }
 
     if (mode === "decode") {
