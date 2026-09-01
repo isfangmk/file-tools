@@ -11,11 +11,29 @@ npm run dev
 
 ## 打包
 
+### macOS / Linux
+
 ```bash
 npm run build
 ```
 
 产物位于 `src-tauri/target/release/bundle/`（macOS 为 `.app` / `.dmg`）。
+
+### Windows (.exe)
+
+在 Mac 上无法直接交叉编译 Windows 安装包。推送代码后，GitHub Actions 会在 Windows 环境自动构建：
+
+1. 打开 [Actions → Build Windows](https://github.com/isfangmk/file-tools/actions/workflows/build-windows.yml)
+2. 等待任务完成
+3. 在 **Artifacts** 下载 `File-Tools-Windows-Setup`（NSIS 安装包 `.exe`）
+
+本地 Windows 机器可直接运行：
+
+```bat
+build.bat
+```
+
+产物：`src-tauri\target\release\bundle\nsis\File Tools_0.1.0_x64-setup.exe`
 
 ## 功能
 
