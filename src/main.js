@@ -21,11 +21,11 @@ let pasteIngest = null;
 
 const copy = {
   encode: {
-    title: "Drop files here",
-    sub: "Outputs are written next to the source.",
+    title: "Drop files or folders here",
+    sub: "Folders are zipped first, then encoded. Use Copy to grab the result.",
     browse: "Browse files",
     run: "Convert",
-    hint: "Encode writes <b>base64-N.txt</b> — use Copy to grab output<br />line 1 name · line 2 MD5 · line 3 Base64",
+    hint: "Folders → <b>.zip</b> then Base64 · tap <b>Copy</b> for clipboard<br />line 1 name · line 2 MD5 · line 3 Base64",
     multiple: true,
     dialogTitle: "Select files to encode",
     filters: null,
@@ -65,8 +65,9 @@ const copy = {
   },
 };
 
-/** 编码输出文件路径（用于复制按钮） */
-let encodeOutputs = [];
+/** 操作结果列表：label 为展示文案；copyPath 有值时显示 Copy */
+/** @type {{ label: string, copyPath?: string }[]} */
+let resultItems = [];
 
 const dropEl = document.getElementById("drop");
 const pastePanel = document.getElementById("paste-panel");
@@ -83,7 +84,7 @@ const browseBtn = document.getElementById("browse");
 const fileList = document.getElementById("file-list");
 const faceToggle = document.getElementById("face-toggle");
 const chunkRow = document.getElementById("chunk-row");
-const encodeOutputsEl = document.getElementById("encode-outputs");
+const resultOutputsEl = document.getElementById("result-outputs");
 const hintEl = document.getElementById("hint");
 const runBtn = document.getElementById("run");
 const statusEl = document.getElementById("status");
@@ -91,6 +92,7 @@ const statusText = statusEl.querySelector(".status-text");
 
 function setStatus(msg, kind = "") {
   statusText.textContent = msg;
+  statusText.title = msg;
   statusEl.className = "status" + (kind ? ` ${kind}` : "");
 }
 
@@ -122,8 +124,11 @@ function renderFiles() {
   }
 
   dropTitle.textContent =
-    list.length === 1 ? "1 file selected" : `${list.length} files selected`;
-  dropSub.textContent = "Click Convert below, or add more files.";
+    list.length === 1 ? "1 item selected" : `${list.length} items selected`;
+  dropSub.textContent =
+    mode === "encode"
+      ? "Folders will be zipped automatically. Click Convert below."
+      : "Click Convert below, or add more files.";
 
   fileList.innerHTML = "";
   for (const p of list) {
@@ -215,48 +220,65 @@ function setDecodeFace(face) {
   }
 }
 
-function renderEncodeOutputs() {
-  encodeOutputsEl.innerHTML = "";
-  if (!encodeOutputs.length || mode !== "encode") {
-    encodeOutputsEl.hidden = true;
+function renderResultItems() {
+  resultOutputsEl.innerHTML = "";
+  if (!resultItems.length) {
+    resultOutputsEl.hidden = true;
     return;
   }
 
-  for (const path of encodeOutputs) {
+  for (const item of resultItems) {
     const row = document.createElement("li");
-    row.className = "encode-row";
+    row.className = "result-row";
 
     const pathEl = document.createElement("span");
-    pathEl.className = "encode-path";
-    pathEl.textContent = path;
-    pathEl.title = path;
+    pathEl.className = "result-path";
+    pathEl.textContent = item.label;
+    pathEl.title = item.label;
 
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "copy-btn";
-    btn.textContent = "Copy";
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      try {
-        const msg = await invoke("copy_text_file", { path });
-        setStatus(msg, "ok");
-      } catch (e) {
-        const err = typeof e === "string" ? e : e?.message || String(e);
-        setStatus(`Error: ${err}`, "error");
-      } finally {
-        btn.disabled = false;
-      }
-    });
-
-    row.append(pathEl, btn);
-    encodeOutputsEl.appendChild(row);
+    if (item.copyPath) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "copy-btn";
+      btn.textContent = "Copy";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          const msg = await invoke("copy_text_file", { path: item.copyPath });
+          setStatus(msg, "ok");
+        } catch (e) {
+          const err = typeof e === "string" ? e : e?.message || String(e);
+          setStatus(`Error: ${err}`, "error");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      row.append(pathEl, btn);
+    } else {
+      row.append(pathEl);
+    }
+    resultOutputsEl.appendChild(row);
   }
-  encodeOutputsEl.hidden = false;
+  resultOutputsEl.hidden = false;
 }
 
-function clearEncodeOutputs() {
-  encodeOutputs = [];
-  renderEncodeOutputs();
+/** 展示路径型结果（拆分 / 合并 / 解码）。 */
+function setPathResults(outputs) {
+  resultItems = (outputs || []).map((p) => ({ label: p }));
+  renderResultItems();
+}
+
+async function clearResultItems() {
+  const hadEncode = resultItems.some((it) => it.copyPath);
+  if (hadEncode) {
+    try {
+      await invoke("clear_encode_temp");
+    } catch {
+      // 临时文件清理失败可忽略
+    }
+  }
+  resultItems = [];
+  renderResultItems();
 }
 
 function setPaths(next) {
@@ -268,7 +290,7 @@ function setPaths(next) {
   }
   if (paths.length) {
     clearPasteIngest();
-    clearEncodeOutputs();
+    clearResultItems();
   }
   renderFiles();
 }
@@ -288,8 +310,7 @@ function applyMode(next) {
   hintEl.innerHTML = cfg.hint;
   chunkRow.hidden = mode !== "split";
   faceToggle.hidden = mode !== "decode";
-  encodeOutputsEl.hidden = mode !== "encode" || !encodeOutputs.length;
-  if (mode !== "encode") clearEncodeOutputs();
+  clearResultItems();
   setDecodeFace("drop");
 
   paths = [];
@@ -360,10 +381,13 @@ appWindow.onDragDropEvent((event) => {
 runBtn.addEventListener("click", () => {
   runJob(async () => {
     if (mode === "encode") {
-      if (!paths.length) throw new Error("Select at least one file.");
+      if (!paths.length) throw new Error("Select at least one file or folder.");
       const result = await invoke("encode_files", { paths });
-      encodeOutputs = result.outputs || [];
-      renderEncodeOutputs();
+      resultItems = (result.items || []).map((it) => ({
+        label: it.name,
+        copyPath: it.tempPath,
+      }));
+      renderResultItems();
       return result.message;
     }
 
@@ -375,16 +399,19 @@ runBtn.addEventListener("click", () => {
           defaultPath: pasteIngest.name,
         });
         if (!outPath) throw new Error("Save cancelled.");
-        const msg = await invoke("decode_paste_temp", {
+        const result = await invoke("decode_paste_temp", {
           tempPath: pasteIngest.tempPath,
           outPath,
         });
         pasteIngest = null;
         renderPasteSummary();
-        return msg;
+        setPathResults(result.outputs);
+        return result.message;
       }
       if (!paths.length) throw new Error("Drop a file or switch to Paste.");
-      return invoke("decode_files", { paths });
+      const result = await invoke("decode_files", { paths });
+      setPathResults(result.outputs);
+      return result.message;
     }
 
     if (mode === "split") {
@@ -394,11 +421,15 @@ runBtn.addEventListener("click", () => {
         throw new Error("Size must be a positive integer.");
       }
       const unit = document.getElementById("spl-unit").value;
-      return invoke("split_file", { path: paths[0], size, unit });
+      const result = await invoke("split_file", { path: paths[0], size, unit });
+      setPathResults(result.outputs);
+      return result.message;
     }
 
     if (!paths.length) throw new Error("Select a valid part file.");
-    return invoke("merge_files", { firstPart: paths[0] });
+    const result = await invoke("merge_files", { firstPart: paths[0] });
+    setPathResults(result.outputs);
+    return result.message;
   });
 });
 

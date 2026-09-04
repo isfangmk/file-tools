@@ -25,8 +25,8 @@
 
       <div class="stage" id="stage">
         <section class="panel drop active" id="drop" tabindex="0" aria-label="File drop zone">
-          <p class="drop-title" id="drop-title">Drop files here</p>
-          <p class="drop-sub" id="drop-sub">Outputs are written next to the source.</p>
+          <p class="drop-title" id="drop-title">Drop files or folders here</p>
+          <p class="drop-sub" id="drop-sub">Folders are zipped first, then encoded. Use Copy to grab the result.</p>
           <div class="drop-or"><span>or</span></div>
           <button type="button" class="browse" id="browse">Browse files</button>
           <ul class="file-list" id="file-list" hidden></ul>
@@ -53,7 +53,7 @@
         </section>
       </div>
 
-      <ul class="encode-outputs" id="encode-outputs" hidden></ul>
+      <ul class="result-outputs" id="result-outputs" hidden></ul>
 
       <div class="chunk" id="chunk-row" hidden>
         <label for="spl-size">Chunk size</label>
@@ -68,7 +68,7 @@
 
       <footer class="bottom">
         <p class="hint" id="hint">
-          Encode writes <b>base64-N.txt</b> — use Copy to grab output<br />
+          Folders → <b>.zip</b> then Base64 · tap <b>Copy</b> for clipboard<br />
           line 1 name · line 2 MD5 · line 3 Base64
         </p>
         <button type="button" class="go" id="run">Convert</button>

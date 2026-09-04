@@ -21,3 +21,5 @@ base64 = "0.22"
 md-5 = "0.10"
 hex = "0.4"
 arboard = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+walkdir = "2"
