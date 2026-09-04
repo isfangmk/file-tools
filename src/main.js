@@ -54,8 +54,12 @@ const copy = {
 };
 
 /** 操作结果列表：label 为展示文案；copyPath 有值时显示 Copy */
-/** @type {{ label: string, copyPath?: string }[]} */
+/** @type {{ label: string, copyPath?: string, sourceSizeLabel?: string, b64SizeLabel?: string }[]} */
 let resultItems = [];
+
+/** 选中路径的体积标签 path -> sizeLabel */
+/** @type {Map<string, string>} */
+let pathSizeLabels = new Map();
 
 const dropEl = document.getElementById("drop");
 const pastePanel = document.getElementById("paste-panel");
@@ -120,11 +124,39 @@ function renderFiles() {
   fileList.innerHTML = "";
   for (const p of list) {
     const li = document.createElement("li");
-    li.textContent = p;
-    li.title = p;
+    li.className = "file-item";
+
+    const pathEl = document.createElement("span");
+    pathEl.className = "file-path";
+    pathEl.textContent = p;
+    pathEl.title = p;
+
+    const sizeEl = document.createElement("span");
+    sizeEl.className = "file-size";
+    sizeEl.textContent = pathSizeLabels.get(p) || "…";
+
+    li.append(pathEl, sizeEl);
     fileList.appendChild(li);
   }
   fileList.hidden = false;
+}
+
+/** 查询选中路径体积并刷新列表。 */
+async function refreshPathSizes() {
+  pathSizeLabels = new Map();
+  if (!paths.length) {
+    renderFiles();
+    return;
+  }
+  renderFiles();
+  try {
+    const infos = await invoke("path_sizes", { paths });
+    pathSizeLabels = new Map(infos.map((it) => [it.path, it.sizeLabel]));
+  } catch (e) {
+    const err = typeof e === "string" ? e : e?.message || String(e);
+    setStatus(`Error: ${err}`, "error");
+  }
+  renderFiles();
 }
 
 /** 刷新粘贴摘要面板。 */
@@ -205,6 +237,14 @@ function renderResultItems() {
     pathEl.className = "result-path";
     pathEl.textContent = item.label;
     pathEl.title = item.label;
+    row.append(pathEl);
+
+    if (item.b64SizeLabel) {
+      const sizeEl = document.createElement("span");
+      sizeEl.className = "file-size";
+      sizeEl.textContent = `Base64 ${item.b64SizeLabel}`;
+      row.append(sizeEl);
+    }
 
     if (item.copyPath) {
       const btn = document.createElement("button");
@@ -223,9 +263,7 @@ function renderResultItems() {
           btn.disabled = false;
         }
       });
-      row.append(pathEl, btn);
-    } else {
-      row.append(pathEl);
+      row.append(btn);
     }
     resultOutputsEl.appendChild(row);
   }
@@ -258,7 +296,7 @@ function setPaths(next) {
   if (paths.length) {
     clearResultItems();
   }
-  renderFiles();
+  refreshPathSizes();
 }
 
 function applyMode(next) {
@@ -276,6 +314,7 @@ function applyMode(next) {
   setStageForMode(mode);
 
   paths = [];
+  pathSizeLabels = new Map();
   if (mode !== "decode") {
     dropTitle.textContent = cfg.title;
     dropSub.textContent = cfg.sub;
@@ -351,7 +390,16 @@ runBtn.addEventListener("click", () => {
       resultItems = (result.items || []).map((it) => ({
         label: it.name,
         copyPath: it.tempPath,
+        sourceSizeLabel: it.sourceSizeLabel,
+        b64SizeLabel: it.b64SizeLabel,
       }));
+      // 用编码结果回填源体积，避免与列表口径不一致
+      for (let i = 0; i < paths.length && i < resultItems.length; i++) {
+        if (resultItems[i].sourceSizeLabel) {
+          pathSizeLabels.set(paths[i], resultItems[i].sourceSizeLabel);
+        }
+      }
+      renderFiles();
       renderResultItems();
       return result.message;
     }
