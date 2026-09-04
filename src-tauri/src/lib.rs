@@ -5,6 +5,10 @@ use md5::{Digest, Md5};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
+use zip::write::SimpleFileOptions;
+use zip::CompressionMethod;
+use zip::ZipWriter;
 
 /// 将字节数格式化为人类可读字符串。
 fn fsize(b: u64) -> String {
@@ -43,54 +47,176 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to copy to clipboard: {e}"))
 }
 
-/// 编码结果：消息 + 输出文件路径列表（供前端展示复制按钮）。
+/// 单条编码结果：展示名 + 临时文件路径（供 Copy，不落源目录）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EncodeItem {
+    name: String,
+    temp_path: String,
+}
+
+/// 编码结果：消息 + 可复制条目列表。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EncodeResult {
     message: String,
+    items: Vec<EncodeItem>,
+}
+
+/// 带输出路径的操作结果（拆分 / 合并 / 解码）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PathResult {
+    message: String,
     outputs: Vec<String>,
 }
 
-/// 将若干文件编码为 base64-N.txt。
-fn encode_files_sync(paths: Vec<String>) -> Result<EncodeResult, String> {
-    if paths.is_empty() {
-        return Err("Select at least one file.".into());
+/// 编码临时目录：存放待复制的 Base64 文本，不污染源文件旁。
+fn encode_temp_dir() -> PathBuf {
+    std::env::temp_dir().join("file-tools-encode")
+}
+
+/// 为本轮编码创建独立批次目录，避免并行调用互相覆盖。
+fn new_encode_batch_dir() -> Result<PathBuf, String> {
+    let root = encode_temp_dir();
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let batch = root.join(format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(&batch).map_err(|e| e.to_string())?;
+    Ok(batch)
+}
+
+/// 将目录打成 zip（条目以「目录名/…」为根），写入指定路径。
+fn zip_directory(src_dir: &Path, zip_path: &Path) -> Result<(), String> {
+    if !src_dir.is_dir() {
+        return Err(format!("{} is not a directory.", src_dir.display()));
     }
-    let outdir = Path::new(&paths[0])
-        .parent()
-        .ok_or_else(|| "Invalid input path.".to_string())?;
+    let folder_name = src_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("Invalid directory name: {}", src_dir.display()))?;
 
-    let total = paths.len();
-    let mut outputs = Vec::new();
-    let mut ok = 0usize;
+    let file = File::create(zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
-    for (idx, fi) in paths.iter().enumerate() {
-        let path = Path::new(fi);
-        let data = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // 先写入目录根条目，保证空文件夹也能打出有效 zip
+    zip.add_directory(format!("{folder_name}/"), options)
+        .map_err(|e| format!("zip {}: {e}", src_dir.display()))?;
+
+    for entry in WalkDir::new(src_dir).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path == src_dir {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(src_dir)
+            .map_err(|e| format!("strip prefix: {e}"))?;
+        let name_in_zip = Path::new(folder_name).join(rel);
+        // zip 规范使用正斜杠路径
+        let name_str = name_in_zip
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+
+        if path.is_dir() {
+            let dir_name = if name_str.ends_with('/') {
+                name_str
+            } else {
+                format!("{name_str}/")
+            };
+            zip.add_directory(dir_name, options)
+                .map_err(|e| format!("zip dir {}: {e}", path.display()))?;
+        } else if path.is_file() {
+            zip.start_file(name_str, options)
+                .map_err(|e| format!("zip file {}: {e}", path.display()))?;
+            let mut f = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::io::copy(&mut f, &mut zip).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+    }
+
+    zip.finish()
+        .map_err(|e| format!("finalize zip {}: {e}", zip_path.display()))?;
+    Ok(())
+}
+
+/// 准备待编码字节：普通文件直接读取；目录先压缩为 zip（临时文件，编码后删除）。
+fn prepare_encode_payload(path: &Path) -> Result<(String, Vec<u8>), String> {
+    if path.is_dir() {
+        let folder_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| format!("Invalid directory name: {}", path.display()))?;
+        let zip_name = format!("{folder_name}.zip");
+        let tmp = std::env::temp_dir().join(format!(
+            "file-tools-zip-{}-{}.zip",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ));
+        zip_directory(path, &tmp)?;
+        let data = fs::read(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        let _ = fs::remove_file(&tmp);
+        Ok((zip_name, data))
+    } else if path.is_file() {
         let name = path
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
+            .unwrap_or("unknown")
+            .to_string();
+        let data = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok((name, data))
+    } else {
+        Err(format!("Not a file or directory: {}", path.display()))
+    }
+}
+
+/// 将若干文件（或文件夹）编码到临时文本，供前端 Copy；文件夹会先打成 zip 再编码。
+fn encode_files_sync(paths: Vec<String>) -> Result<EncodeResult, String> {
+    if paths.is_empty() {
+        return Err("Select at least one file or folder.".into());
+    }
+    let outdir = new_encode_batch_dir()?;
+
+    let total = paths.len();
+    let mut items = Vec::new();
+
+    for (idx, fi) in paths.iter().enumerate() {
+        let path = Path::new(fi);
+        let (name, data) = prepare_encode_payload(path)?;
         let digest = md5_hex(&data);
         let b64 = B64.encode(&data);
 
-        let out = outdir.join(format!("base64-{}.txt", idx + 1));
+        let out = outdir.join(format!("encode-{}.txt", idx + 1));
         let content = format!("{name}\n{digest}\n{b64}");
         fs::write(&out, content).map_err(|e| format!("{}: {e}", out.display()))?;
-        outputs.push(out.display().to_string());
-        ok += 1;
+        items.push(EncodeItem {
+            name,
+            temp_path: out.display().to_string(),
+        });
     }
 
-    let message = if outputs.len() == 1 {
-        format!("Done: {ok}/{total} file encoded -> {}", outputs[0])
+    let names: Vec<_> = items.iter().map(|i| i.name.as_str()).collect();
+    let message = if items.len() == 1 {
+        format!("Done: 1/{total} encoded · use Copy for {}", names[0])
     } else {
         format!(
-            "Done: {ok}/{total} files encoded:\n{}",
-            outputs.join("\n")
+            "Done: {}/{total} encoded · use Copy for each:\n{}",
+            items.len(),
+            names.join("\n")
         )
     };
 
-    Ok(EncodeResult { message, outputs })
+    Ok(EncodeResult { message, items })
 }
 
 #[tauri::command]
@@ -104,10 +230,20 @@ async fn encode_files(paths: Vec<String>) -> Result<EncodeResult, String> {
 fn copy_text_file_sync(path: String) -> Result<String, String> {
     let text = fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
     write_clipboard_text(&text)?;
-    let label = Path::new(&path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
+    // 优先用编码文本第一行（原始文件名）作为提示
+    let label = text
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            Path::new(&path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output")
+                .to_string()
+        });
     Ok(format!("Copied {label} to clipboard"))
 }
 
@@ -116,6 +252,14 @@ async fn copy_text_file(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || copy_text_file_sync(path))
         .await
         .map_err(|e| format!("copy task failed: {e}"))?
+}
+
+/// 清理编码产生的临时文件。
+#[tauri::command]
+fn clear_encode_temp() -> Result<(), String> {
+    let dir = encode_temp_dir();
+    let _ = fs::remove_dir_all(&dir);
+    Ok(())
 }
 
 /// 解析「文件名 / MD5 / Base64」文本，返回 (建议文件名, 原始字节)。
@@ -244,13 +388,13 @@ fn clear_paste_temp(path: String) -> Result<(), String> {
 
 /// 解析 base64 文本文件并还原原始文件，校验 MD5。
 #[tauri::command]
-async fn decode_files(paths: Vec<String>) -> Result<String, String> {
+async fn decode_files(paths: Vec<String>) -> Result<PathResult, String> {
     tauri::async_runtime::spawn_blocking(move || decode_files_sync(paths))
         .await
         .map_err(|e| format!("decode task failed: {e}"))?
 }
 
-fn decode_files_sync(paths: Vec<String>) -> Result<String, String> {
+fn decode_files_sync(paths: Vec<String>) -> Result<PathResult, String> {
     if paths.is_empty() {
         return Err("Select at least one file.".into());
     }
@@ -280,19 +424,18 @@ fn decode_files_sync(paths: Vec<String>) -> Result<String, String> {
         ok += 1;
     }
 
-    if outputs.len() == 1 {
-        Ok(format!("Done: {ok}/{total} file restored -> {}", outputs[0]))
+    let message = if outputs.len() == 1 {
+        format!("Done: {ok}/{total} file restored")
     } else {
-        Ok(format!(
-            "Done: {ok}/{total} files restored:\n{}",
-            outputs.join("\n")
-        ))
-    }
+        format!("Done: {ok}/{total} files restored")
+    };
+
+    Ok(PathResult { message, outputs })
 }
 
 /// 将粘贴临时文件解码到用户选定的输出路径。
 #[tauri::command]
-async fn decode_paste_temp(temp_path: String, out_path: String) -> Result<String, String> {
+async fn decode_paste_temp(temp_path: String, out_path: String) -> Result<PathResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let text = fs::read_to_string(&temp_path).map_err(|e| e.to_string())?;
         let (_name, data) = parse_decode_text(&text)?;
@@ -304,7 +447,11 @@ async fn decode_paste_temp(temp_path: String, out_path: String) -> Result<String
         }
         fs::write(out, &data).map_err(|e| format!("{}: {e}", out.display()))?;
         let _ = fs::remove_file(&temp_path);
-        Ok(format!("Done: 1/1 file restored -> {}", out.display()))
+        let out_path = out.display().to_string();
+        Ok(PathResult {
+            message: "Done: 1/1 file restored".into(),
+            outputs: vec![out_path],
+        })
     })
     .await
     .map_err(|e| format!("decode task failed: {e}"))?
@@ -312,7 +459,7 @@ async fn decode_paste_temp(temp_path: String, out_path: String) -> Result<String
 
 /// 按指定块大小拆分文件，生成 .0001 / .0002 … 分片。
 #[tauri::command]
-fn split_file(path: String, size: u64, unit: String) -> Result<String, String> {
+fn split_file(path: String, size: u64, unit: String) -> Result<PathResult, String> {
     if size < 1 {
         return Err("Size must be a positive integer.".into());
     }
@@ -330,6 +477,7 @@ fn split_file(path: String, size: u64, unit: String) -> Result<String, String> {
 
     let mut file = File::open(fi).map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; chunk as usize];
+    let mut outputs = Vec::new();
     let mut idx = 0u32;
 
     loop {
@@ -341,18 +489,17 @@ fn split_file(path: String, size: u64, unit: String) -> Result<String, String> {
         let part = format!("{}.{:04}", path, idx);
         let mut out = File::create(&part).map_err(|e| e.to_string())?;
         out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        outputs.push(part);
     }
 
     let name = fi.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
-    Ok(format!(
-        "{name}  ->  {idx} part(s)  @ {}",
-        fsize(chunk)
-    ))
+    let message = format!("{name}  ->  {idx} part(s)  @ {}", fsize(chunk));
+    Ok(PathResult { message, outputs })
 }
 
 /// 根据首个分片路径自动发现全部 .NNNN 分片并合并，合并后删除分片。
 #[tauri::command]
-fn merge_files(first_part: String) -> Result<String, String> {
+fn merge_files(first_part: String) -> Result<PathResult, String> {
     let p1 = Path::new(&first_part);
     if !p1.is_file() {
         return Err("Select a valid part file.".into());
@@ -402,12 +549,16 @@ fn merge_files(first_part: String) -> Result<String, String> {
         let _ = fs::remove_file(part);
     }
 
-    Ok(format!(
-        "{} part(s)  ->  {}  ({})",
-        parts.len(),
-        fout.display(),
-        fsize(total)
-    ))
+    let out_path = fout.display().to_string();
+    Ok(PathResult {
+        message: format!(
+            "{} part(s)  ->  {}  ({})",
+            parts.len(),
+            out_path,
+            fsize(total)
+        ),
+        outputs: vec![out_path],
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -417,6 +568,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             encode_files,
             copy_text_file,
+            clear_encode_temp,
             decode_files,
             ingest_clipboard_b64,
             clear_paste_temp,
@@ -444,16 +596,55 @@ mod tests {
         fs::write(&src, &data).unwrap();
 
         let result = encode_files_sync(vec![src.display().to_string()]).unwrap();
-        let b64 = PathBuf::from(&result.outputs[0]);
+        let b64 = PathBuf::from(&result.items[0].temp_path);
         assert!(b64.is_file());
+        assert_eq!(result.items[0].name, "test.bin");
 
-        // 解码会写出同名文件，先挪开原文件避免覆盖干扰断言
+        // 解码写到临时目录旁；先挪开源文件避免路径混淆
         fs::rename(&src, dir.join("test.bin.bak")).unwrap();
         decode_files_sync(vec![b64.display().to_string()]).unwrap();
-        let restored = fs::read(dir.join("test.bin")).unwrap();
+        let restored = fs::read(b64.parent().unwrap().join("test.bin")).unwrap();
         assert_eq!(restored, data.as_slice());
 
         let _ = fs::remove_dir_all(&dir);
+        if let Some(batch) = b64.parent() {
+            let _ = fs::remove_dir_all(batch);
+        }
+    }
+
+    #[test]
+    fn encode_folder_as_zip() {
+        let dir = temp_dir().join("filetools_tauri_folder");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let folder = dir.join("payload");
+        fs::create_dir_all(folder.join("nested")).unwrap();
+        fs::write(folder.join("a.txt"), b"alpha").unwrap();
+        fs::write(folder.join("nested/b.txt"), b"beta").unwrap();
+
+        let result = encode_files_sync(vec![folder.display().to_string()]).unwrap();
+        assert_eq!(result.items[0].name, "payload.zip");
+        let text = fs::read_to_string(&result.items[0].temp_path).unwrap();
+        let (name, bytes) = parse_decode_text(&text).unwrap();
+        assert_eq!(name, "payload.zip");
+        assert!(!bytes.is_empty());
+
+        // 校验 zip 内包含预期条目
+        let cursor = std::io::Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        names.sort();
+        assert!(names.iter().any(|n| n.contains("a.txt")));
+        assert!(names.iter().any(|n| n.contains("b.txt")));
+
+        let _ = fs::remove_dir_all(&dir);
+        // 只清本批临时文件，避免并行测试误删其它批次
+        if let Some(batch) = Path::new(&result.items[0].temp_path).parent() {
+            let _ = fs::remove_dir_all(batch);
+        }
     }
 
     #[test]
@@ -466,12 +657,14 @@ mod tests {
         let data = b"0123456789".repeat(300);
         fs::write(&src, &data).unwrap();
 
-        split_file(src.display().to_string(), 2048, "Bytes".into()).unwrap();
-        assert!(PathBuf::from(format!("{}.0001", src.display())).is_file());
+        let split = split_file(src.display().to_string(), 2048, "Bytes".into()).unwrap();
+        assert!(!split.outputs.is_empty());
+        assert!(PathBuf::from(&split.outputs[0]).is_file());
 
         // 合并会删除分片并写回同路径，先删原文件模拟仅有分片的场景
         fs::remove_file(&src).unwrap();
-        merge_files(format!("{}.0001", src.display())).unwrap();
+        let merged_result = merge_files(format!("{}.0001", src.display())).unwrap();
+        assert_eq!(merged_result.outputs[0], src.display().to_string());
         let merged = fs::read(&src).unwrap();
         assert_eq!(merged, data.as_slice());
         assert!(!PathBuf::from(format!("{}.0001", src.display())).exists());
