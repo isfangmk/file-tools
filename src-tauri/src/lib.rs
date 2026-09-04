@@ -47,12 +47,14 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to copy to clipboard: {e}"))
 }
 
-/// 单条编码结果：展示名 + 临时文件路径（供 Copy，不落源目录）。
+/// 单条编码结果：展示名、临时路径、源体积与 Base64 体积。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EncodeItem {
     name: String,
     temp_path: String,
+    source_size_label: String,
+    b64_size_label: String,
 }
 
 /// 编码结果：消息 + 可复制条目列表。
@@ -61,6 +63,14 @@ struct EncodeItem {
 struct EncodeResult {
     message: String,
     items: Vec<EncodeItem>,
+}
+
+/// 路径体积信息，供选中列表展示。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PathSizeInfo {
+    path: String,
+    size_label: String,
 }
 
 /// 带输出路径的操作结果（拆分 / 合并 / 解码）。
@@ -147,6 +157,44 @@ fn zip_directory(src_dir: &Path, zip_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 统计文件字节数，或目录内全部文件字节总和。
+fn path_byte_size(path: &Path) -> Result<u64, String> {
+    if path.is_file() {
+        Ok(fs::metadata(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?
+            .len())
+    } else if path.is_dir() {
+        let mut total = 0u64;
+        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+            if entry.file_type().is_file() {
+                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+            }
+        }
+        Ok(total)
+    } else {
+        Err(format!("Not a file or directory: {}", path.display()))
+    }
+}
+
+/// 批量查询路径体积，供前端选中列表展示。
+#[tauri::command]
+async fn path_sizes(paths: Vec<String>) -> Result<Vec<PathSizeInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .map(|path| {
+                let size = path_byte_size(Path::new(&path))?;
+                Ok(PathSizeInfo {
+                    path,
+                    size_label: fsize(size),
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("path_sizes task failed: {e}"))?
+}
+
 /// 准备待编码字节：普通文件直接读取；目录先压缩为 zip（临时文件，编码后删除）。
 fn prepare_encode_payload(path: &Path) -> Result<(String, Vec<u8>), String> {
     if path.is_dir() {
@@ -192,6 +240,7 @@ fn encode_files_sync(paths: Vec<String>) -> Result<EncodeResult, String> {
 
     for (idx, fi) in paths.iter().enumerate() {
         let path = Path::new(fi);
+        let source_bytes = path_byte_size(path)?;
         let (name, data) = prepare_encode_payload(path)?;
         let digest = md5_hex(&data);
         let b64 = B64.encode(&data);
@@ -202,17 +251,21 @@ fn encode_files_sync(paths: Vec<String>) -> Result<EncodeResult, String> {
         items.push(EncodeItem {
             name,
             temp_path: out.display().to_string(),
+            source_size_label: fsize(source_bytes),
+            b64_size_label: fsize(b64.len() as u64),
         });
     }
 
-    let names: Vec<_> = items.iter().map(|i| i.name.as_str()).collect();
     let message = if items.len() == 1 {
-        format!("Done: 1/{total} encoded · use Copy for {}", names[0])
+        let it = &items[0];
+        format!(
+            "Done: 1/{total} encoded · {} · src {} · Base64 {}",
+            it.name, it.source_size_label, it.b64_size_label
+        )
     } else {
         format!(
-            "Done: {}/{total} encoded · use Copy for each:\n{}",
-            items.len(),
-            names.join("\n")
+            "Done: {}/{total} encoded · use Copy for each",
+            items.len()
         )
     };
 
@@ -560,6 +613,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             encode_files,
+            path_sizes,
             copy_text_file,
             clear_encode_temp,
             ingest_clipboard_b64,
@@ -591,6 +645,8 @@ mod tests {
         let b64 = PathBuf::from(&result.items[0].temp_path);
         assert!(b64.is_file());
         assert_eq!(result.items[0].name, "test.bin");
+        assert!(!result.items[0].source_size_label.is_empty());
+        assert!(!result.items[0].b64_size_label.is_empty());
 
         // 解码写到临时目录旁；先挪开源文件避免路径混淆
         fs::rename(&src, dir.join("test.bin.bak")).unwrap();
