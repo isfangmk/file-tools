@@ -386,14 +386,7 @@ fn clear_paste_temp(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 解析 base64 文本文件并还原原始文件，校验 MD5。
-#[tauri::command]
-async fn decode_files(paths: Vec<String>) -> Result<PathResult, String> {
-    tauri::async_runtime::spawn_blocking(move || decode_files_sync(paths))
-        .await
-        .map_err(|e| format!("decode task failed: {e}"))?
-}
-
+/// 解析 base64 文本文件并还原原始文件，校验 MD5（测试与内部复用）。
 fn decode_files_sync(paths: Vec<String>) -> Result<PathResult, String> {
     if paths.is_empty() {
         return Err("Select at least one file.".into());
@@ -569,7 +562,6 @@ pub fn run() {
             encode_files,
             copy_text_file,
             clear_encode_temp,
-            decode_files,
             ingest_clipboard_b64,
             clear_paste_temp,
             decode_paste_temp,

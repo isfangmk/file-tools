@@ -1,6 +1,6 @@
 /**
  * File Tools 前端：拖放工作台。
- * 大段 Base64 由 Rust 读剪贴板落临时文件，前端只显示摘要，避免 textarea 卡顿。
+ * Decode 仅支持粘贴；大段 Base64 由 Rust 读剪贴板落临时文件，前端只显示摘要。
  */
 
 const { invoke } = window.__TAURI__.core;
@@ -10,10 +10,7 @@ const { getCurrentWebviewWindow } = window.__TAURI__.webviewWindow;
 /** @type {"encode"|"decode"|"split"|"merge"} */
 let mode = "encode";
 
-/** @type {"drop"|"paste"} */
-let decodeFace = "drop";
-
-/** 当前选中路径 */
+/** 当前选中路径（Encode / Split / Merge） */
 let paths = [];
 
 /** @type {{ tempPath: string, name: string, md5: string, sizeLabel: string } | null} */
@@ -31,17 +28,8 @@ const copy = {
     filters: null,
   },
   decode: {
-    title: "Drop base64 text here",
-    sub: "Switch to Paste for clipboard text. Format: name / MD5 / Base64.",
-    browse: "Browse text files",
     run: "Restore",
-    hint: "Format: <b>line 1 name · line 2 MD5 · line 3+ Base64</b>",
-    multiple: true,
-    dialogTitle: "Select base64 text files",
-    filters: [
-      { name: "Text", extensions: ["txt"] },
-      { name: "All", extensions: ["*"] },
-    ],
+    hint: "Paste Base64 · format: <b>line 1 name · line 2 MD5 · line 3+ Base64</b>",
   },
   split: {
     title: "Drop a file to split",
@@ -82,7 +70,6 @@ const dropTitle = document.getElementById("drop-title");
 const dropSub = document.getElementById("drop-sub");
 const browseBtn = document.getElementById("browse");
 const fileList = document.getElementById("file-list");
-const faceToggle = document.getElementById("face-toggle");
 const chunkRow = document.getElementById("chunk-row");
 const resultOutputsEl = document.getElementById("result-outputs");
 const hintEl = document.getElementById("hint");
@@ -179,10 +166,6 @@ async function ingestFromClipboard() {
       md5: info.md5,
       sizeLabel: info.sizeLabel,
     };
-    if (paths.length) {
-      paths = [];
-      renderFiles();
-    }
     renderPasteSummary();
     setStatus(`Clipboard ready · ${info.sizeLabel}`, "ok");
   } catch (e) {
@@ -193,27 +176,14 @@ async function ingestFromClipboard() {
   }
 }
 
-/**
- * @param {"drop"|"paste"} face
- */
-function setDecodeFace(face) {
-  decodeFace = face;
-  const showPaste = face === "paste";
-
+/** Decode 显示粘贴面，其它模式显示拖放区。 */
+function setStageForMode(next) {
+  const showPaste = next === "decode";
   dropEl.classList.toggle("active", !showPaste);
   dropEl.hidden = showPaste;
   pastePanel.classList.toggle("active", showPaste);
   pastePanel.hidden = !showPaste;
-
-  document.querySelectorAll(".face-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.face === face);
-  });
-
   if (showPaste) {
-    if (paths.length) {
-      paths = [];
-      renderFiles();
-    }
     requestAnimationFrame(() => pastePanel.focus());
   } else {
     clearPasteIngest();
@@ -285,11 +255,7 @@ function setPaths(next) {
   const cfg = copy[mode];
   const list = (Array.isArray(next) ? next : next ? [next] : []).filter(Boolean);
   paths = cfg.multiple ? list : list.slice(0, 1);
-  if (paths.length && mode === "decode" && decodeFace === "paste") {
-    setDecodeFace("drop");
-  }
   if (paths.length) {
-    clearPasteIngest();
     clearResultItems();
   }
   renderFiles();
@@ -303,27 +269,24 @@ function applyMode(next) {
     btn.classList.toggle("active", btn.dataset.mode === mode);
   });
 
-  dropTitle.textContent = cfg.title;
-  dropSub.textContent = cfg.sub;
-  browseBtn.textContent = cfg.browse;
   runBtn.textContent = cfg.run;
   hintEl.innerHTML = cfg.hint;
   chunkRow.hidden = mode !== "split";
-  faceToggle.hidden = mode !== "decode";
   clearResultItems();
-  setDecodeFace("drop");
+  setStageForMode(mode);
 
   paths = [];
-  renderFiles();
+  if (mode !== "decode") {
+    dropTitle.textContent = cfg.title;
+    dropSub.textContent = cfg.sub;
+    browseBtn.textContent = cfg.browse;
+    renderFiles();
+  }
   setStatus("Ready");
 }
 
 document.querySelectorAll(".pill").forEach((btn) => {
   btn.addEventListener("click", () => applyMode(btn.dataset.mode));
-});
-
-document.querySelectorAll(".face-btn").forEach((btn) => {
-  btn.addEventListener("click", () => setDecodeFace(btn.dataset.face));
 });
 
 document.querySelectorAll(".unit").forEach((btn) => {
@@ -339,11 +302,11 @@ pasteClear.addEventListener("click", () => {
   setStatus("Ready");
 });
 
-// 在 Paste 面拦截 ⌘V，阻止浏览器把巨量文本塞进 DOM
+// 在 Decode 拦截 ⌘V，阻止浏览器把巨量文本塞进 DOM
 window.addEventListener(
   "paste",
   (e) => {
-    if (mode !== "decode" || decodeFace !== "paste") return;
+    if (mode !== "decode") return;
     e.preventDefault();
     ingestFromClipboard();
   },
@@ -351,6 +314,7 @@ window.addEventListener(
 );
 
 browseBtn.addEventListener("click", async () => {
+  if (mode === "decode") return;
   const cfg = copy[mode];
   const opts = {
     multiple: cfg.multiple,
@@ -365,7 +329,8 @@ browseBtn.addEventListener("click", async () => {
 const appWindow = getCurrentWebviewWindow();
 appWindow.onDragDropEvent((event) => {
   const { type } = event.payload;
-  if (mode === "decode" && decodeFace === "paste") return;
+  // Decode 仅粘贴，忽略拖放
+  if (mode === "decode") return;
 
   if (type === "enter" || type === "over") {
     dropEl.classList.add("dragover");
@@ -392,24 +357,18 @@ runBtn.addEventListener("click", () => {
     }
 
     if (mode === "decode") {
-      if (decodeFace === "paste" || pasteIngest) {
-        if (!pasteIngest) throw new Error("Paste Base64 text first.");
-        const outPath = await save({
-          title: "Save restored file",
-          defaultPath: pasteIngest.name,
-        });
-        if (!outPath) throw new Error("Save cancelled.");
-        const result = await invoke("decode_paste_temp", {
-          tempPath: pasteIngest.tempPath,
-          outPath,
-        });
-        pasteIngest = null;
-        renderPasteSummary();
-        setPathResults(result.outputs);
-        return result.message;
-      }
-      if (!paths.length) throw new Error("Drop a file or switch to Paste.");
-      const result = await invoke("decode_files", { paths });
+      if (!pasteIngest) throw new Error("Paste Base64 text first.");
+      const outPath = await save({
+        title: "Save restored file",
+        defaultPath: pasteIngest.name,
+      });
+      if (!outPath) throw new Error("Save cancelled.");
+      const result = await invoke("decode_paste_temp", {
+        tempPath: pasteIngest.tempPath,
+        outPath,
+      });
+      pasteIngest = null;
+      renderPasteSummary();
       setPathResults(result.outputs);
       return result.message;
     }

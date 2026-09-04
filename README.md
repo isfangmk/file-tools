@@ -45,6 +45,6 @@ npm run build:windows:offline
 | 功能 | 说明 |
 |------|------|
 | File → Base64 | 编码后点 Copy 复制到剪贴板（不写 `base64-N.txt`）；拖入文件夹时先压缩为 zip 再编码 |
-| Base64 → File | 按同样格式还原并校验 MD5 |
+| Base64 → File | 粘贴剪贴板中的 Base64 文本还原文件并校验 MD5 |
 | Split File | 按 MB / KB / Bytes 拆成 `.0001` `.0002` … |
 | Merge Files | 选中 `.0001` 自动合并全部后缀分片，并删除分片 |
