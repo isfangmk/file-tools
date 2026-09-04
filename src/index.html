@@ -18,11 +18,6 @@
         </nav>
       </header>
 
-      <div class="face-toggle" id="face-toggle" hidden>
-        <button type="button" class="face-btn active" data-face="drop">Drop</button>
-        <button type="button" class="face-btn" data-face="paste">Paste</button>
-      </div>
-
       <div class="stage" id="stage">
         <section class="panel drop active" id="drop" tabindex="0" aria-label="File drop zone">
           <p class="drop-title" id="drop-title">Drop files or folders here</p>
@@ -32,7 +27,7 @@
           <ul class="file-list" id="file-list" hidden></ul>
         </section>
 
-        <!-- 大文本不进 DOM：只展示摘要 -->
+        <!-- Decode 专用：大文本不进 DOM，只展示摘要 -->
         <section class="panel paste-face" id="paste-panel" tabindex="0" aria-label="Paste Base64 text" hidden>
           <div class="paste-idle" id="paste-idle">
             <p class="drop-title">Paste Base64 text</p>
