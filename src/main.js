@@ -33,10 +33,10 @@ const copy = {
   },
   split: {
     title: "Drop a file to split",
-    sub: "Chunks are written as .0001 · .0002 · … beside the source.",
+    sub: "Each chunk is encoded like Encode. Use Copy to grab Base64 — nothing written beside the source.",
     browse: "Browse file",
     run: "Split",
-    hint: "Output: <b>&lt;file&gt;.0001 · .0002 · …</b>",
+    hint: "Each chunk → Base64 · tap <b>Copy</b> for clipboard<br />line 1 name · line 2 MD5 · line 3 Base64",
     multiple: false,
     dialogTitle: "Select file to split",
     filters: null,
@@ -118,7 +118,7 @@ function renderFiles() {
     list.length === 1 ? "1 item selected" : `${list.length} items selected`;
   dropSub.textContent =
     mode === "encode"
-      ? "Folders will be zipped automatically. Click Convert below."
+      ? "Folders will be zipped automatically. Drop or browse to add more, then Convert."
       : "Click Convert below, or add more files.";
 
   fileList.innerHTML = "";
@@ -292,7 +292,17 @@ async function clearResultItems() {
 function setPaths(next) {
   const cfg = copy[mode];
   const list = (Array.isArray(next) ? next : next ? [next] : []).filter(Boolean);
-  paths = cfg.multiple ? list : list.slice(0, 1);
+  if (cfg.multiple) {
+    const seen = new Set(paths);
+    for (const p of list) {
+      if (!seen.has(p)) {
+        seen.add(p);
+        paths.push(p);
+      }
+    }
+  } else {
+    paths = list.slice(0, 1);
+  }
   if (paths.length) {
     clearResultItems();
   }
@@ -429,7 +439,13 @@ runBtn.addEventListener("click", () => {
       }
       const unit = document.getElementById("spl-unit").value;
       const result = await invoke("split_file", { path: paths[0], size, unit });
-      setPathResults(result.outputs);
+      resultItems = (result.items || []).map((it) => ({
+        label: it.name,
+        copyPath: it.tempPath,
+        sourceSizeLabel: it.sourceSizeLabel,
+        b64SizeLabel: it.b64SizeLabel,
+      }));
+      renderResultItems();
       return result.message;
     }
 

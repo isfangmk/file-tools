@@ -503,9 +503,9 @@ async fn decode_paste_temp(temp_path: String, out_path: String) -> Result<PathRe
     .map_err(|e| format!("decode task failed: {e}"))?
 }
 
-/// 按指定块大小拆分文件，生成 .0001 / .0002 … 分片。
+/// 按指定块大小拆分文件，仅为每片生成可 Copy 的 Base64 临时文本（不写本地 .0001 分片）。
 #[tauri::command]
-fn split_file(path: String, size: u64, unit: String) -> Result<PathResult, String> {
+fn split_file(path: String, size: u64, unit: String) -> Result<EncodeResult, String> {
     if size < 1 {
         return Err("Size must be a positive integer.".into());
     }
@@ -521,9 +521,14 @@ fn split_file(path: String, size: u64, unit: String) -> Result<PathResult, Strin
         return Err("Select a valid file.".into());
     }
 
+    let base_name = fi
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&path);
+    let outdir = new_encode_batch_dir()?;
     let mut file = File::open(fi).map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; chunk as usize];
-    let mut outputs = Vec::new();
+    let mut items = Vec::new();
     let mut idx = 0u32;
 
     loop {
@@ -532,15 +537,26 @@ fn split_file(path: String, size: u64, unit: String) -> Result<PathResult, Strin
             break;
         }
         idx += 1;
-        let part = format!("{}.{:04}", path, idx);
-        let mut out = File::create(&part).map_err(|e| e.to_string())?;
-        out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        outputs.push(part);
+        let data = &buf[..n];
+        let name = format!("{base_name}.{:04}", idx);
+        let digest = md5_hex(data);
+        let b64 = B64.encode(data);
+        let out = outdir.join(format!("split-{}.txt", idx));
+        let content = format!("{name}\n{digest}\n{b64}");
+        fs::write(&out, content).map_err(|e| format!("{}: {e}", out.display()))?;
+        items.push(EncodeItem {
+            name,
+            temp_path: out.display().to_string(),
+            source_size_label: fsize(n as u64),
+            b64_size_label: fsize(b64.len() as u64),
+        });
     }
 
-    let name = fi.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
-    let message = format!("{name}  ->  {idx} part(s)  @ {}", fsize(chunk));
-    Ok(PathResult { message, outputs })
+    let message = format!(
+        "{base_name}  ->  {idx} part(s)  @ {} · use Copy for Base64",
+        fsize(chunk)
+    );
+    Ok(EncodeResult { message, items })
 }
 
 /// 根据首个分片路径自动发现全部 .NNNN 分片并合并，合并后删除分片。
@@ -706,18 +722,23 @@ mod tests {
         fs::write(&src, &data).unwrap();
 
         let split = split_file(src.display().to_string(), 2048, "Bytes".into()).unwrap();
-        assert!(!split.outputs.is_empty());
-        assert!(PathBuf::from(&split.outputs[0]).is_file());
-
-        // 合并会删除分片并写回同路径，先删原文件模拟仅有分片的场景
-        fs::remove_file(&src).unwrap();
-        let merged_result = merge_files(format!("{}.0001", src.display())).unwrap();
-        assert_eq!(merged_result.outputs[0], src.display().to_string());
-        let merged = fs::read(&src).unwrap();
-        assert_eq!(merged, data.as_slice());
+        assert!(!split.items.is_empty());
+        assert!(PathBuf::from(&split.items[0].temp_path).is_file());
         assert!(!PathBuf::from(format!("{}.0001", src.display())).exists());
 
+        // 解码各片 Base64 得到 .0001 分片，再合并还原
+        let part_paths: Vec<String> = split.items.iter().map(|it| it.temp_path.clone()).collect();
+        let decoded = decode_files_sync(part_paths).unwrap();
+        assert!(!decoded.outputs.is_empty());
+        let first_part = &decoded.outputs[0];
+        let merged_result = merge_files(first_part.clone()).unwrap();
+        let merged = fs::read(&merged_result.outputs[0]).unwrap();
+        assert_eq!(merged, data.as_slice());
+
         let _ = fs::remove_dir_all(&dir);
+        if let Some(batch) = Path::new(&split.items[0].temp_path).parent() {
+            let _ = fs::remove_dir_all(batch);
+        }
     }
 
     #[test]
