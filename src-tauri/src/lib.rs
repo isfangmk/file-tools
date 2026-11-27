@@ -263,10 +263,7 @@ fn encode_files_sync(paths: Vec<String>) -> Result<EncodeResult, String> {
             it.name, it.source_size_label, it.b64_size_label
         )
     } else {
-        format!(
-            "Done: {}/{total} encoded · use Copy for each",
-            items.len()
-        )
+        format!("Done: {}/{total} encoded · use Copy for each", items.len())
     };
 
     Ok(EncodeResult { message, items })
@@ -439,7 +436,11 @@ fn clear_paste_temp(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 解析 base64 文本文件并还原原始文件，校验 MD5（测试与内部复用）。
+/// 解析 base64 文本文件并还原原始文件，校验 MD5（仅测试使用）。
+///
+/// 生产路径走 `decode_paste_temp`：大段 Base64 不落盘成普通文本文件，
+/// 而是先写入临时目录再还原，避免在磁盘上留下明文中间产物。
+#[cfg(test)]
 fn decode_files_sync(paths: Vec<String>) -> Result<PathResult, String> {
     if paths.is_empty() {
         return Err("Select at least one file.".into());
@@ -521,10 +522,7 @@ fn split_file(path: String, size: u64, unit: String) -> Result<EncodeResult, Str
         return Err("Select a valid file.".into());
     }
 
-    let base_name = fi
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&path);
+    let base_name = fi.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
     let outdir = new_encode_batch_dir()?;
     let mut file = File::open(fi).map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; chunk as usize];

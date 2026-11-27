@@ -2,7 +2,7 @@
 name = "file-tools"
 version = "0.1.0"
 description = "File Tools — Base64 encode/decode, split and merge"
-authors = ["you"]
+authors = ["isfangmk <fmk_0817@qq.com>"]
 edition = "2021"
 
 [lib]
