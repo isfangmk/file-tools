@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Tauri 在 Linux 上通过 pkg-config 链接 WebKitGTK，缺少这些库编译会失败。
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --locked
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux build dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src-tauri
+        run: cargo build --release --locked
+
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        working-directory: src-tauri
+        run: cargo build --release --locked
+
+      # Windows 是唯一发布安装包的平台，走完整的 tauri build。
+      - name: Setup Node.js
+        if: matrix.os == 'windows-latest'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        if: matrix.os == 'windows-latest'
+        run: npm ci
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run build
+
+      - name: Upload Windows installers
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: File-Tools-Windows-Installers
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
