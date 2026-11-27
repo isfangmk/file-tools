@@ -1,7 +1,7 @@
 # File Tools
 
 [![CI](https://github.com/isfangmk/file-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/isfangmk/file-tools/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/isfangmk/file-tools.svg?maxAge=86400)](https://github.com/isfangmk/file-tools/releases/latest)
+[![Release](https://img.shields.io/github/v/release/isfangmk/file-tools.svg)](https://github.com/isfangmk/file-tools/releases/latest)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
 桌面端文件工具（Tauri v2）：Base64 编解码、按块拆分、分片合并。
