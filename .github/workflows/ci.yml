@@ -108,14 +108,12 @@ jobs:
 
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
-        run: npm run build
+        run: npm run build -- --bundles nsis
 
-      - name: Upload Windows installers
+      - name: Upload Windows installer
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: File-Tools-Windows-Installers
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          name: File-Tools-Windows-Installer
+          path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error

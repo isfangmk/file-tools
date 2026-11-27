@@ -34,7 +34,6 @@ Windows 安装包在 [Releases](https://github.com/isfangmk/file-tools/releases/
 | 产物 | 说明 |
 |------|------|
 | `File-Tools-Windows-Setup-<版本>.exe` | 安装包，安装时需联网下载 WebView2 运行时 |
-| `File-Tools-Windows-<版本>.msi` | MSI 安装包 |
 
 WebView2 运行时在 Windows 11 与 Windows 10 1803 及以上版本已预装。
 
