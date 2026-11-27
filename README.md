@@ -33,9 +33,10 @@ Windows 安装包在 [Releases](https://github.com/isfangmk/file-tools/releases/
 
 | 产物 | 说明 |
 |------|------|
-| `File-Tools-Windows-Setup-<版本>.exe` | 在线安装包，体积小，安装时需联网下载 WebView2 |
-| `File-Tools-Windows-Setup-Offline-<版本>.exe` | 离线安装包（自带 WebView2），内网可直接安装 |
+| `File-Tools-Windows-Setup-<版本>.exe` | 安装包，安装时需联网下载 WebView2 运行时 |
 | `File-Tools-Windows-<版本>.msi` | MSI 安装包 |
+
+WebView2 运行时在 Windows 11 与 Windows 10 1803 及以上版本已预装。
 
 macOS / Linux 可自行构建（见下）。
 
@@ -69,9 +70,6 @@ npm run build
 ```bash
 # 本地 Windows
 build.bat
-
-# 内网离线包
-npm run build:windows:offline
 ```
 
 ## 技术栈
@@ -87,7 +85,6 @@ src/                  前端（index.html / main.js / styles.css）
 src-tauri/            Rust 端
   src/lib.rs          业务实现与 Tauri 命令
   tauri.conf.json     应用配置
-  tauri.offline.conf.json  离线安装包配置
 design/               界面风格样板
 tools/                仓库辅助脚本
 .github/workflows/    CI 与发布

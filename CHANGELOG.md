@@ -36,6 +36,8 @@ Base64 内容
 - `cargo fmt` 规范化 Rust 源码；`decode_files_sync` 标注为仅测试使用，
   消除 Clippy 的 dead-code 告警。
 - 补充 LICENSE（BSD-3-Clause）与变更记录；界面风格样板移入 `design/`。
+- 移除离线安装包构建（内嵌 WebView2 运行时后安装包达 300MB，
+  而应用本体仅 10MB），发布流程只保留在线安装包。
 
 [Unreleased]: https://github.com/isfangmk/file-tools/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/isfangmk/file-tools/releases/tag/v0.1.0
