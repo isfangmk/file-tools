@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag，例如 v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build Windows installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read app version
+        shell: bash
+        run: |
+          VERSION="$(python -c "
+          import json, pathlib
+          conf = json.loads(pathlib.Path('src-tauri/tauri.conf.json').read_text(encoding='utf-8'))
+          print(conf['version'])
+          ")"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Verify version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "$TAG" != "v$APP_VERSION" ]; then
+            echo "tag $TAG 与应用版本 $APP_VERSION 不一致"
+            exit 1
+          fi
+
+      # 在线安装包：安装时才下载 WebView2，体积小。
+      - name: Build online installer
+        run: npm run build
+
+      # 两种安装包的文件名相同，先把在线版收走，再构建离线版。
+      - name: Collect online installer
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          cp -v src-tauri/target/release/bundle/nsis/*.exe \
+            "dist-release/File-Tools-Windows-Setup-${APP_VERSION}.exe"
+          cp -v src-tauri/target/release/bundle/msi/*.msi \
+            "dist-release/File-Tools-Windows-${APP_VERSION}.msi"
+
+      # 离线安装包：自带 WebView2，体积大，内网可直接安装。
+      - name: Build offline installer
+        run: npm run build:windows:offline
+
+      - name: Collect offline installer
+        shell: bash
+        run: |
+          cp -v src-tauri/target/release/bundle/nsis/*.exe \
+            "dist-release/File-Tools-Windows-Setup-Offline-${APP_VERSION}.exe"
+
+      - name: Build release notes
+        shell: bash
+        run: |
+          {
+            echo "**桌面端文件工具：Base64 编解码、按块拆分、分片合并。**"
+            echo
+            echo "拖入文件即可处理，结果直接复制到剪贴板。"
+            echo
+            echo "---"
+            echo
+            if [ -f CHANGELOG.md ] && grep -q "^## \[$APP_VERSION\]" CHANGELOG.md; then
+              python tools/changelog_section.py "$APP_VERSION" --full
+            else
+              echo "本次发布包含安装包构建与发布流程。"
+            fi
+            echo "---"
+            echo
+            echo "### 安装包"
+            echo
+            echo "| 文件 | 说明 |"
+            echo "|------|------|"
+            echo "| \`File-Tools-Windows-Setup-${APP_VERSION}.exe\` | 在线安装包，体积小，安装时需联网下载 WebView2 |"
+            echo "| \`File-Tools-Windows-Setup-Offline-${APP_VERSION}.exe\` | 离线安装包，自带 WebView2，内网可直接安装 |"
+            echo "| \`File-Tools-Windows-${APP_VERSION}.msi\` | MSI 安装包 |"
+            echo
+            echo "使用说明：<https://github.com/isfangmk/file-tools#readme>"
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: dist-release/*
+          fail_on_unmatched_files: true
+
+      - name: Upload installers as workflow artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: File-Tools-Windows-Installers
+          path: dist-release/
+          if-no-files-found: error
