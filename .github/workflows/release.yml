@@ -84,6 +84,7 @@ jobs:
             else
               echo "本次发布包含安装包构建与发布流程。"
             fi
+            echo
             echo "---"
             echo
             echo "### 安装包"
