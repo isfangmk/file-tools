@@ -67,6 +67,8 @@ def main(argv: list[str]) -> int:
     except (KeyError, OSError) as exc:
         print(f"无法提取版本 {version} 的变更条目：{exc}", file=sys.stderr)
         return 1
+    # Windows 上 stdout 默认是 GBK/cp1252，中文内容无法直接写出。
+    sys.stdout.reconfigure(encoding="utf-8")
     sys.stdout.write(section)
     return 0
 
